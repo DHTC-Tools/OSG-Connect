@@ -1,0 +1,175 @@
+#!/bin/bash
+
+# Adapted from Purdue's wrapper script
+
+CONDOR_SUBMIT_REAL="/usr/bin/.condor_submit"
+COUSERNAME=`/usr/bin/id -un`
+COGROUPNAME=`/usr/bin/id -gn`
+SUBARGS=$*
+NEXTARG=0
+VANILLA=""
+# Uncomment the following line to test project validity, NOTE: you must have the project files
+TEST_VALID="yes"
+# Uncomment the following to set the XSEDE accounting group
+#SET_ACCOUNTING="yes"
+
+if [ $# -gt 0 ]; then
+    for subarg in "$@"; do
+        case $subarg in 
+            -v*)
+                ;;
+            -d*) 
+                ;;
+            -s*) 
+                ;;
+            --h*) 
+                ;;
+            -h*) 
+                ;;
+            -p*) 
+                NEXTARG=1
+                ;;
+            -a*)
+                NEXTARG=1
+                ;;
+            -r*)
+                NEXTARG=1
+                ;;
+            -n*) 
+                NEXTARG=1
+                ;;
+            *)
+                if [ $NEXTARG -ne 1 ]; then
+                    SUBFILE="$subarg"
+                    VANILLA=`grep -i vanilla $SUBFILE`
+                else
+                    NEXTARG=0
+                fi            
+        esac
+    done
+fi
+
+if [ -z "$SUBFILE" ]; then
+    exec $CONDOR_SUBMIT_REAL "$@"
+fi
+
+# check for certain universes and submit regardless eif one of them
+universe=`grep -i universe $SUBFILE | grep -v \# | cut -d= -f2`
+case $universe in
+    *scheduler*)
+        exec $CONDOR_SUBMIT_REAL "$@"
+        ;;
+    *local*)
+        exec $CONDOR_SUBMIT_REAL "$@"
+        ;;
+    *grid*)
+        exec $CONDOR_SUBMIT_REAL "$@"
+        ;;
+    *)
+        /bin/true 
+        ;;
+esac
+
+me=`whoami`
+
+# first check the job classad
+OSG_PROJECT=`grep -i '^\+ProjectName' $SUBFILE | cut -d= -f2`
+
+# then a default projects file in the user's home directory
+if [ -z "$OSG_PROJECT" -a -e "$HOME/.osg_default_project" ]; then
+    OSG_PROJECT=`cat "$HOME/.osg_default_project"`
+fi
+
+# Set default OSG Connect 
+if [ -z "$OSG_PROJECT" ]; then
+    OSG_PROJECT="OSG-Connect"
+fi
+
+function check_project {
+    # $1 user, $2 group to test (optional)
+    # if no $2 is given then all groups including the user are returned
+    if [ "x$2" == "x" ]; then
+        # if [ -f etc/osg/projects ]; then
+        #   cat /etc/osg/projects | grep $me | sed 's/:.*//' | sort
+        # fi
+        #echo "$(ypcat group | tr : , | sed -e 's/$/,/' | grep ,$1, | cut -d, -f1)"
+        echo "$(getent group | tr : , | sed -e 's/$/,/' | grep ,$1, | cut -d, -f1 | sort)"
+        return
+    else
+        echo ,$(getent group $2 | cut -d: -f4), | grep ",$1," 2>&1 > /dev/null
+        return $?
+    fi
+}
+
+if [ -z "$OSG_PROJECT" ]; then
+    echo
+    echo "No ProjectName ClassAd defined!"
+    echo "Please record your OSG project ID in your submit file."
+    echo "  Example:  +ProjectName = \"OSG-CO1234567\""
+    echo
+    echo "Based on your username, here is a list of projects you might have "
+    echo "access to:"
+    check_project $me
+    exit 1
+fi
+
+OSG_PROJECT=`echo "$OSG_PROJECT" | sed "s/[\"' \t]//g"`  # get rid of quotes and spaces
+
+# by here, we have a project number specified. Is it valid?
+if [ ! -z "$TEST_VALID" ]; then
+  
+  #grep "^$OSG_PROJECT:" /etc/osg/projects | grep $me  2>&1 > /dev/null
+  #echo ,$(getent group $OSG_PROJECT | cut -d: -f4), | grep ",$me," 2>&1 > /dev/null
+  check_project $me $OSG_PROJECT
+  valid=$?
+
+  if [ "${valid}" == "1" ]; then        # Nope
+      echo
+      echo "Sorry, the project you specified ($OSG_PROJECT) is not valid or "
+      echo "you are not in the list of allowed users."
+      echo
+      echo "Based on your username, here is a list of projects you might have "
+      echo "access to:"
+      check_project $me
+      exit 1
+  fi
+fi
+
+if [  ! -z "$SET_ACCOUNTING" ]
+then
+  # what accounting group do we belong to?
+  #ACCTGROUP="group_other.$me"
+  ACCTGROUP="group_opportunistic.$me"
+  if grep -i "^$OSG_PROJECT:" /etc/osg/xsede-projects-low-priority >/dev/null 2>&1; then
+      #ACCTGROUP="group_xsede.low.$me"
+      ACCTGROUP="group_opportunistic.$me"
+  elif grep -i "^$OSG_PROJECT:" /etc/osg/xsede-projects-high-priority >/dev/null 2>&1; then
+      ACCTGROUP="group_xsede.high.$me"
+  elif [ "x$XSEDE_PROJECT" = "xTG-TRA100004" ];then
+      # special rule for TG-TRA100004 - rynge 8/12/13
+      ACCTGROUP="group_other.$me"
+  fi
+
+# special cases
+  if echo "$OSG_PROJECT" | grep -i "OSG-Staff" >/dev/null 2>&1; then
+      ACCTGROUP="group_xsede.high.$me"
+  fi
+#if echo "$XSEDE_PROJECT" | grep -i "Snowmass" >/dev/null 2>&1; then
+#    ACCTGROUP="group_snowmass.$me"
+#fi
+
+# if we get this far, we're ok
+  exec $CONDOR_SUBMIT_REAL \
+       -a "+UsedOCWrapper = TRUE" \
+       -a "+ProjectName = \"${OSG_PROJECT}\"" \
+       -a "+AccountingGroup = \"${ACCTGROUP}\"" \
+       "$@"
+  # ending!
+fi
+
+# if we get this far, we're ok (no accounting set)
+exec $CONDOR_SUBMIT_REAL \
+     -a "+UsedOCWrapper = TRUE" \
+     -a "+ProjectName = \"${OSG_PROJECT}\"" \
+     "$@"
+
