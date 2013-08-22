@@ -1,0 +1,46 @@
+#!/bin/sh
+# Condor status for multiple pools
+# first version by Marco Mambelli marco@hep.uchicago.edu - 8/20/2013
+
+if [[ "x$1" == "x-?" || "x$1" == "x-h" || "x$1" == "x--help" ]]; then
+    echo "condor_status_all [ -f | --full]"
+    exit 0
+fi
+
+if [[ "x$1" == "x-f" || "x$1" == "x--full" ]]; then
+    FULL="yes"
+fi
+
+# ZEROFILL="yes"
+
+POOLS=`condor_config_val flock_to`
+#IFS=', ' read -a pools <<< "$POOLS"
+arr=$(echo $POOLS | tr "," "\n")
+
+function get_status {
+    if [ "x$1" == "x" ]; then
+        PARAM=""
+    else
+        PARAM="-pool $1"
+    fi
+    if [ ! -z $FULL ]; then
+        condor_status $PARAM
+    else
+        #condor_status $PARAM | grep "Total" | grep -v "Owner" | sed "s/Total/Slots /"
+        condor_status $PARAM | grep "Total" | grep -v "Owner" | sed "s/Total/     /"
+        if [ $? ]; then
+            [ -z $ZEROFILL ] || echo "                         0     0       0         0       0          0        0"
+        fi
+    fi
+}
+echo "Summary of available resources for all available HTCondor pools."
+echo "                     Total Owner Claimed Unclaimed Matched Preempting Backfill"
+echo "LOCAL POOL:"
+get_status
+
+#for i in "${array[@]}"
+for i in $arr
+do
+    echo "POOL $i:"
+    get_status $i
+done
