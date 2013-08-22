@@ -84,10 +84,10 @@ if [ -z "$OSG_PROJECT" -a -e "$HOME/.osg_default_project" ]; then
     OSG_PROJECT=`cat "$HOME/.osg_default_project"`
 fi
 
-# Set default OSG Connect 
-if [ -z "$OSG_PROJECT" ]; then
-    OSG_PROJECT="OSG-Connect"
-fi
+# NO MORE default OSG Connect project
+#if [ -z "$OSG_PROJECT" ]; then
+#    OSG_PROJECT="OSG-Connect"
+#fi
 
 function check_project {
     # $1 user, $2 group to test (optional)
@@ -139,6 +139,8 @@ if [ ! -z "$TEST_VALID" ]; then
   fi
 fi
 
+
+
 if [  ! -z "$SET_ACCOUNTING" ]
 then
   # what accounting group do we belong to?
@@ -161,6 +163,10 @@ then
 #if echo "$XSEDE_PROJECT" | grep -i "Snowmass" >/dev/null 2>&1; then
 #    ACCTGROUP="group_snowmass.$me"
 #fi
+
+# Accouting group OVERRIDE required by MWT2
+  # +AccountingGroup="group_opport.vo.uc3.`whoami`"
+  ACCTGROUP="group_opport.vo.uc3.$me"
 
 # if we get this far, we're ok
   exec $CONDOR_SUBMIT_REAL \
