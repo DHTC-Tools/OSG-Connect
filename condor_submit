@@ -1,6 +1,6 @@
 #!/bin/bash
-
-# Adapted from Purdue's wrapper script
+# Adapted by Mats Rynge from Purdue's wrapper script
+# Adaptation to OSG-Connect by Marco Mambelli - marco@hep.uchicago.edu
 
 CONDOR_SUBMIT_REAL="/usr/bin/.condor_submit"
 COUSERNAME=`/usr/bin/id -un`
@@ -8,9 +8,13 @@ COGROUPNAME=`/usr/bin/id -gn`
 SUBARGS=$*
 NEXTARG=0
 VANILLA=""
-# Uncomment the following line to test project validity, NOTE: you must have the project files
+
+# Uncomment the following line to test project validity, 
+# NOTE: you must belong to unix groups named after the project name (capitalization counts)
+# previous version was using project files
 TEST_VALID="yes"
 # Uncomment the following to set the XSEDE accounting group
+# This has not been tested with unix groups, still requires project files
 #SET_ACCOUNTING="yes"
 
 if [ $# -gt 0 ]; then
