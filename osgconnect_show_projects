@@ -1,0 +1,6 @@
+#!/bin/sh
+#Marco Mambelli 130820 marco@hep.uchicago.edu
+me=`whoami`
+echo "Based on your username, here is a list of projects you might have"
+echo "access to:"
+echo "$(ypcat group | tr : , | sed -e 's/$/,/' | grep ,$me, | cut -d, -f1)"
