@@ -3,4 +3,8 @@
 me=`whoami`
 echo "Based on your username, here is a list of projects you might have"
 echo "access to:"
-echo "$(ypcat group | tr : , | sed -e 's/$/,/' | grep ,$me, | cut -d, -f1)"
+# Using "getent group" instead of "ypcat group" to include also local groups (e.g. OSG-Staff) 
+echo "$(getent group | tr : , | sed -e 's/$/,/' | grep ,$me, | cut -d, -f1 | grep ^[@_] | sed -e 's/^@/con-/' | sed -e 's/^_//' | sort)"
+#mygroups=",$(ypcat group | tr : , | sed -e 's/$/,/' | grep ,$me, | cut -d, -f1 | tr \n ,)"
+#echo "$(echo $mygroups| sed -e 's/,train,/,con-train,/' |  sed -e 's/,atlas,/,con-atlas,/' |  sed -e 's/,staff,/,con-staff,/' |  sed -e 's/,swift,/,con-swift,/' )"
+
