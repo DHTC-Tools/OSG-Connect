@@ -96,11 +96,12 @@ function check_project {
         # if [ -f etc/osg/projects ]; then
         #   cat /etc/osg/projects | grep $me | sed 's/:.*//' | sort
         # fi
-        #echo "$(ypcat group | tr : , | sed -e 's/$/,/' | grep ,$1, | cut -d, -f1)"
-        echo "$(getent group | tr : , | sed -e 's/$/,/' | grep ,$1, | cut -d, -f1 | sort)"
+        # could invoke osgconnect_show_projects
+        echo "$(getent group | tr : , | sed -e 's/$/,/' | grep ,$1, | cut -d, -f1 | grep ^[@_] | sed -e 's/^@/con-/' | sed -e 's/^_//' | sort)"
         return
     else
-        echo ,$(getent group $2 | cut -d: -f4), | grep ",$1," 2>&1 > /dev/null
+        tmp_group=`echo $2 | sed -e 's/^con-/@/'`
+        echo ,$(getent group $tmp_group | cut -d: -f4), | grep ",$1," 2>&1 > /dev/null
         return $?
     fi
 }
