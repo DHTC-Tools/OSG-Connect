@@ -1,8 +1,49 @@
 #!/bin/sh
 #Marco Mambelli 130820 marco@hep.uchicago.edu
+
+function help_msg {
+  cat >&2 << EOF 
+$0 [ -h | -u USER ] PROJECT
+Prints the projects membership for the user if no PROJECT is provided (exit code 0)
+If PROJECT is provided returns 0 if the user is memeber, 1 otherwise
+ -u USER  set the user name (the one running the script by detault)
+ -q       quiet (prints only the projects list when no project is provided)
+ -h       print this help message
+EOF
+}
+
 me=`whoami`
-echo "Based on your username, here is a list of projects you might have"
-echo "access to:"
+
+while getopts hqu: option
+do
+  case "${option}"
+  in
+  "h") help_msg; exit 2;;
+  "u") me=${OPTARG};;
+  "q") QUIET="true";;
+  *) help_msg; exit 2;;
+  esac
+done
+shift $((OPTIND-1))
+
+# Check for project membership
+if [ ! -z $1 ]; then 
+  PROJECT=$1
+  # return membership
+  tmp_group=`echo "_$PROJECT" | sed -e 's/^_con-/@/'`
+  echo ,$(getent group $tmp_group | cut -d: -f4), | grep ",$me," 2>&1 > /dev/null
+  RETV=$?
+  if [ -z $QUIET ]; then
+    [ $RETV -eq 0 ] &&  echo "User $me belongs to project $PROJECT" || echo "User $me does not belong to project $PROJECT"
+  fi
+  exit $RETV
+fi
+
+# Return project list
+if [ -z $QUIET ]; then
+  echo "Based on username ($me), here is a list of projects you might have"
+  echo "access to:"
+fi
 # Using "getent group" instead of "ypcat group" to include also local groups (e.g. OSG-Staff) 
 echo "$(getent group | tr : , | sed -e 's/$/,/' | grep ,$me, | cut -d, -f1 | grep ^[@_] | sed -e 's/^@/con-/' | sed -e 's/^_//' | sort)"
 #mygroups=",$(ypcat group | tr : , | sed -e 's/$/,/' | grep ,$me, | cut -d, -f1 | tr \n ,)"

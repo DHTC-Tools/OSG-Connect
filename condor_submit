@@ -3,6 +3,10 @@
 # Adaptation to OSG-Connect by Marco Mambelli - marco@hep.uchicago.edu
 
 CONDOR_SUBMIT_REAL="/usr/bin/.condor_submit"
+# Must have interface: CHECK_MEMBERSHIP [-u UID] [PROJECT]
+# return valid project list if project is not provuded, otherwise 
+# return 0 if user is member of project, 1 otherwise 
+CHECK_MEMBERSHIP="/usr/bin/osgconnect_show_projects -q"
 COUSERNAME=`/usr/bin/id -un`
 COGROUPNAME=`/usr/bin/id -gn`
 SUBARGS=$*
@@ -114,7 +118,8 @@ if [ -z "$OSG_PROJECT" ]; then
     echo
     echo "Based on your username, here is a list of projects you might have "
     echo "access to:"
-    check_project $me
+    #check_project $me
+    $CHECK_MEMBERSHIP -u $me
     exit 1
 fi
 
@@ -125,7 +130,7 @@ if [ ! -z "$TEST_VALID" ]; then
   
   #grep "^$OSG_PROJECT:" /etc/osg/projects | grep $me  2>&1 > /dev/null
   #echo ,$(getent group $OSG_PROJECT | cut -d: -f4), | grep ",$me," 2>&1 > /dev/null
-  check_project $me $OSG_PROJECT
+  $CHECK_MEMBERSHIP -u $me $OSG_PROJECT
   valid=$?
 
   if [ "${valid}" == "1" ]; then        # Nope
@@ -135,7 +140,7 @@ if [ ! -z "$TEST_VALID" ]; then
       echo
       echo "Based on your username, here is a list of projects you might have "
       echo "access to:"
-      check_project $me
+      $CHECK_MEMBERSHIP -u $me
       exit 1
   fi
 fi
