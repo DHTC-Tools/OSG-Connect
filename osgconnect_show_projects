@@ -1,5 +1,7 @@
 #!/bin/sh
 #Marco Mambelli 130820 marco@hep.uchicago.edu
+# Project names translation as of 9/17/13
+# all Projects have corresponding UNIX groups starting with "@"
 
 function help_msg {
   cat >&2 << EOF 
@@ -30,7 +32,8 @@ shift $((OPTIND-1))
 if [ ! -z $1 ]; then 
   PROJECT=$1
   # return membership
-  tmp_group=`echo "_$PROJECT" | sed -e 's/^_con-/@/'`
+  #tmp_group=`echo "_$PROJECT" | sed -e 's/^_con-/@/'`
+  tmp_group=`echo "@$PROJECT"`
   echo ,$(getent group $tmp_group | cut -d: -f4), | grep ",$me," 2>&1 > /dev/null
   RETV=$?
   if [ -z $QUIET ]; then
@@ -45,7 +48,7 @@ if [ -z $QUIET ]; then
   echo "access to:"
 fi
 # Using "getent group" instead of "ypcat group" to include also local groups (e.g. OSG-Staff) 
-echo "$(getent group | tr : , | sed -e 's/$/,/' | grep ,$me, | cut -d, -f1 | grep ^[@_] | sed -e 's/^@/con-/' | sed -e 's/^_//' | sort)"
+echo "$(getent group | tr : , | sed -e 's/$/,/' | grep ,$me, | cut -d, -f1 | grep ^[@] | sed -e 's/^@//' | sort)"
 #mygroups=",$(ypcat group | tr : , | sed -e 's/$/,/' | grep ,$me, | cut -d, -f1 | tr \n ,)"
 #echo "$(echo $mygroups| sed -e 's/,train,/,con-train,/' |  sed -e 's/,atlas,/,con-atlas,/' |  sed -e 's/,staff,/,con-staff,/' |  sed -e 's/,swift,/,con-swift,/' )"
 
