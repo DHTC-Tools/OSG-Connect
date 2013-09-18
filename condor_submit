@@ -70,9 +70,6 @@ case $universe in
     *local*)
         exec $CONDOR_SUBMIT_REAL "$@"
         ;;
-    *grid*)
-        exec $CONDOR_SUBMIT_REAL "$@"
-        ;;
     *)
         /bin/true 
         ;;
