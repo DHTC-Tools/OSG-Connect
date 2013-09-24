@@ -1,0 +1,172 @@
+#!/bin/bash
+# Marco Mambelli - marco@hep.uchciago.edu
+
+JOB_ID=JOB_ID
+PLOT_DIR=$HOME/data/public
+PLOT_TYPE=pie
+# 300
+PLOT_WIDTH=1000
+# 400
+PLOT_HEIGHT=1200
+PLOT_CUT=100
+DEFAULT_PLOT_TITLE='eval "echo Distribution for job \$JOB_ID"'
+#DEFAULT_FILE_NAME='eval "echo chart_\${PLOT_TYPE}_\${${JOB_ID}}.html"'
+DEFAULT_FILE_NAME='eval "echo chart_\${PLOT_TYPE}_\${JOB_ID}.html"'
+VALID_PLOT_TYPES="pie"
+COMMAND_PRE="condor_history -format '%s\\n' LastRemoteHost"
+COMMAND_POST=""
+
+
+function help_msg {
+  FILE_NAME=`eval $DEFAULT_FILE_NAME`
+  PLOT_TITLE=`eval $DEFAULT_PLOT_TITLE`
+  cat << EOF
+$0 [ options ] JOB_ID
+ Edit $0 to set the default options 
+ -d DIR   set an alternative output directory
+ -p PLOT  set the plot type [$VALID_PLOT_TYPES]
+ -n NAME  set a different plot file name (Default: $FILE_NAME)
+ -t TITLE set a different title (Default: $PLOT_TITLE)
+ -c CUT   cut to the first CUT entries
+ -g       group domain names
+ -i FILE  get the input from file instead of "condor_history -format '%s\\n' LastRemoteHost JOB_ID" 
+ -h       print this help message
+EOF
+}
+# -s       sort by Site instead of job count
+
+
+# add width/height
+while getopts hd:p:n:t:c:gi: option
+do
+  case "${option}"
+  in 
+  "h") help_msg; exit 0;;
+  "a") 
+     SHOST_PLOTS="yes"
+     VO_PLOTS="yes"
+     FORONTEND_PLOTS="yes"
+     FORONTEND_PLOTS2="yes"
+     ERROR_PLOTS="yes"
+     NEW_PLOTS="yes"
+     NEW_PLOTS2="yes"
+     ;;
+  "d") PLOT_DIR=${OPTARG};;
+  "p") PLOT_TYPE=${OPTARG};;
+  "n") FILE_NAME=${OPTARG};;
+  "t") PLOT_TITLE=${OPTARG};;
+  "c") PLOT_CUT=${OPTARG};;
+  "g") PLOT_GROUP=2;;
+  "i") INPUT_FILE=${OPTARG};;
+  esac
+done
+
+shift $((OPTIND-1))
+
+# Check arguments
+if [ -z $1 ]; then
+  echo "Missing JOB_ID"
+  help_msg
+  exit 1
+fi
+JOB_ID=$1
+
+# Check paramaters
+if [ -z $FILE_NAME ]; then
+  FILE_NAME=`eval $DEFAULT_FILE_NAME`
+fi
+
+if [ -z $PLOT_TITLE ]; then
+  PLOT_TITLE=`eval $DEFAULT_PLOT_TITLE`
+fi
+
+if [ -n $PLOT_TYPE ]; then
+  if [ "x$PLOT_TYPE" == "xpie" ]; then
+    PLOT_TYPE=PieChart
+  else
+    echo "Unsupported plot type: $PLOT_TYPE not in [$VALID_PLOT_TYPES]."
+    help_msg
+    exit 1
+  fi
+fi 
+
+#DB echo "Options: name: $FILE_NAME, title $PLOT_TITLE , dir: $PLOT_DIR, input: $INPUT_FILE."
+#exit 2
+
+
+if [ -z $INPUT_FILE ]; then 
+  INPUT_FILE=`mktemp -u tmp.cplot.XXXXXXXXXX`
+  TMP_FILE_TODEL=$INPUT_FILE
+  condor_history -format '%s\n' LastRemoteHost $JOB_ID > $INPUT_FILE
+  # | sort -n to sort by number?
+  #input_data=`condor_history -format '%s\\n' LastRemoteHost $JOB_ID | cut -d@ -f2 | sort | uniq -c | sed -r 's/^( *[^ ]+) +/\1,/'`
+  #input_data=`condor_history -format '%s\\n' LastRemoteHost $JOB_ID | cut -d@ -f2 | sort | uniq -c | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
+fi
+
+if [ -z $PLOT_GROUP ]; then
+  input_data=`cat $INPUT_FILE | cut -d@ -f2 | sort | uniq -c | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
+elif [ "x$PLOT_GROUP" == "x2" ]; then
+  # same as else branch
+  input_data=`cat $INPUT_FILE | cut -d@ -f2 | sed -r 's/.*([^.]*)\.([^.]*)\.([^.]*)/\2.\3/' | sed 's/^\.*//' | sort | uniq -c | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
+elif [ "x$PLOT_GROUP" == "x1" ]; then
+  input_data=`cat $INPUT_FILE | cut -d@ -f2 | sed -r 's/.*([^.]*)\.([^.]*)\.([^.]*)/\3/' | sed 's/^\.*//' | sort | uniq -c | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
+else
+  input_data=`cat $INPUT_FILE | cut -d@ -f2 | sed -r 's/.*([^.]*)\.([^.]*)\.([^.]*)/\2.\3/' | sed 's/^\.*//' | sort | uniq -c | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
+  #input_data=`cat $INPUT_FILE`
+fi
+
+if [ ! -z $TMP_FILE_TODEL ]; then
+  rm $TMP_FILE_TODEL
+fi
+
+cat > $PLOT_DIR/$FILE_NAME << EOF 
+<html>
+  <head>
+    <!--Load the AJAX API-->
+    <script type="text/javascript" src="https://www.google.com/jsapi"></script>
+    <script type="text/javascript">
+
+      // Load the Visualization API and the piechart package.
+      google.load('visualization', '1.0', {'packages':['corechart']});
+
+      // Set a callback to run when the Google Visualization API is loaded.
+      google.setOnLoadCallback(drawChart);
+
+      // Callback that creates and populates a data table,
+      // instantiates the pie chart, passes in the data and
+      // draws it.
+      function drawChart() {
+
+        // Create the data table.
+        var data = new google.visualization.DataTable();
+        data.addColumn('string', 'Site');
+        data.addColumn('number', '# of jobs');
+        data.addRows([
+EOF
+#          ['Mushrooms', 3],
+#          ['Onions', 1],
+#          ['Olives', 1],
+for i in $input_data; do
+  echo "         ['${i#*,} (${i%,*})', ${i%,*}],"  >> $PLOT_DIR/$FILE_NAME
+done
+cat >> $PLOT_DIR/$FILE_NAME << EOF 
+        ]);
+
+        // Set chart options
+        var options = {'title':'$PLOT_TITLE',
+                       'width':$PLOT_WIDTH,
+                       'height':$PLOT_HEIGHT};
+
+        // Instantiate and draw our chart, passing in some options.
+        var chart = new google.visualization.$PLOT_TYPE(document.getElementById('chart_div'));
+        chart.draw(data, options);
+      }
+    </script>
+  </head>
+
+  <body>
+    <!--Div that will hold the pie chart-->
+    <div id="chart_div"></div>
+  </body>
+</html>
+EOF
