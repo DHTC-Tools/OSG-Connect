@@ -4,15 +4,15 @@
 JOB_ID=JOB_ID
 PLOT_DIR=$HOME/data/public
 PLOT_TYPE=pie
-# 300
+# previous dimensions 300 x 400
 PLOT_WIDTH=1000
-# 400
 PLOT_HEIGHT=1200
 PLOT_CUT=100
+PLOT_LABEL=number
 DEFAULT_PLOT_TITLE='eval "echo Distribution for job \$JOB_ID"'
 #DEFAULT_FILE_NAME='eval "echo chart_\${PLOT_TYPE}_\${${JOB_ID}}.html"'
 DEFAULT_FILE_NAME='eval "echo chart_\${PLOT_TYPE}_\${JOB_ID}.html"'
-VALID_PLOT_TYPES="pie"
+VALID_PLOT_TYPES="table,pie,bar,tmap"
 COMMAND_PRE="condor_history -format '%s\\n' LastRemoteHost"
 COMMAND_POST=""
 
@@ -22,26 +22,35 @@ function help_msg {
   PLOT_TITLE=`eval $DEFAULT_PLOT_TITLE`
   cat << EOF
 $0 [ options ] JOB_ID
+$0 [ options ] -i FILE [ JOB_ID ]
  Edit $0 to set the default options 
- -d DIR   set an alternative output directory
- -p PLOT  set the plot type [$VALID_PLOT_TYPES]
+ -d DIR   set an alternative output directory (Def: $PLOT_DIR)
+ -p PLOT  set the plot type [$VALID_PLOT_TYPES] (Def: pie)
  -n NAME  set a different plot file name (Default: $FILE_NAME)
  -t TITLE set a different title (Default: $PLOT_TITLE)
- -c CUT   cut to the first CUT entries
+ -c CUT   cut to the first CUT entries (Default: $PLOT_CUT)
+ -l MOD   label modifier [number,plain] (Def: $PLOT_LABEL)
+ -w WIDTH set width (Default: $PLOT_WIDTH)
+ -h HEIGHT set height (Default: $PLOT_HEIGHT)
  -g       group domain names
  -i FILE  get the input from file instead of "condor_history -format '%s\\n' LastRemoteHost JOB_ID" 
- -h       print this help message
+ -q       quiet
+ -?       print this help message
+Examples:
+ condor_plot -p tmap -l number -t 'Tree map proportional to the number of jobs' 30806
+ condor_plot -p pie -i ./ptp -c 100 -g 30806bis
+ condor_plot -p bar -h 2000 30806
 EOF
 }
 # -s       sort by Site instead of job count
 
 
 # add width/height
-while getopts hd:p:n:t:c:gi: option
+while getopts ?h:w:d:p:n:t:c:gl:i:q option
 do
   case "${option}"
   in 
-  "h") help_msg; exit 0;;
+  "?") help_msg; exit 0;;
   "a") 
      SHOST_PLOTS="yes"
      VO_PLOTS="yes"
@@ -56,8 +65,12 @@ do
   "n") FILE_NAME=${OPTARG};;
   "t") PLOT_TITLE=${OPTARG};;
   "c") PLOT_CUT=${OPTARG};;
+  "w") PLOT_WIDTH=${OPTARG};;
+  "h") PLOT_HEIGHT=${OPTARG};;
   "g") PLOT_GROUP=2;;
+  "l") PLOT_LABEL=${OPTARG};;
   "i") INPUT_FILE=${OPTARG};;
+  "q") QUIET_RUN=yes;;
   esac
 done
 
@@ -65,24 +78,35 @@ shift $((OPTIND-1))
 
 # Check arguments
 if [ -z $1 ]; then
-  echo "Missing JOB_ID"
-  help_msg
-  exit 1
+  if [ -z $INPUT_FILE ]; then
+    echo "Missing JOB_ID"
+    help_msg
+    exit 1
+  else
+    JOB_ID="JobFile_`basename $INPUT_FILE`"
+  fi
+else
+  JOB_ID=$1
 fi
-JOB_ID=$1
 
 # Check paramaters
 if [ -z $FILE_NAME ]; then
   FILE_NAME=`eval $DEFAULT_FILE_NAME`
 fi
 
-if [ -z $PLOT_TITLE ]; then
+if [ -z "$PLOT_TITLE" ]; then
   PLOT_TITLE=`eval $DEFAULT_PLOT_TITLE`
 fi
 
 if [ -n $PLOT_TYPE ]; then
   if [ "x$PLOT_TYPE" == "xpie" ]; then
     PLOT_TYPE=PieChart
+  elif [ "x$PLOT_TYPE" == "xbar" ]; then
+    PLOT_TYPE=BarChart
+  elif [ "x$PLOT_TYPE" == "xtable" ]; then
+    PLOT_TYPE=Table
+  elif [ "x$PLOT_TYPE" == "xtmap" ]; then
+    PLOT_TYPE=TreeMap
   else
     echo "Unsupported plot type: $PLOT_TYPE not in [$VALID_PLOT_TYPES]."
     help_msg
@@ -90,9 +114,10 @@ if [ -n $PLOT_TYPE ]; then
   fi
 fi 
 
-#DB echo "Options: name: $FILE_NAME, title $PLOT_TITLE , dir: $PLOT_DIR, input: $INPUT_FILE."
-#exit 2
-
+# 
+if [ -z $QUIET_RUN ];then
+  echo "Plotting '$PLOT_TITLE' to $PLOT_DIR/$FILE_NAME (job: $JOB_ID, ${PLOT_WIDTH}x${PLOT_HEIGHT} $PLOT_TYPE)"
+fi
 
 if [ -z $INPUT_FILE ]; then 
   INPUT_FILE=`mktemp -u tmp.cplot.XXXXXXXXXX`
@@ -126,8 +151,10 @@ cat > $PLOT_DIR/$FILE_NAME << EOF
     <script type="text/javascript" src="https://www.google.com/jsapi"></script>
     <script type="text/javascript">
 
-      // Load the Visualization API and the piechart package.
+      // Load the Visualization API and the core (pie,bar) and table package.
       google.load('visualization', '1.0', {'packages':['corechart']});
+      google.load('visualization', '1', {packages:['table']});
+      google.load("visualization", "1", {packages:["treemap"]});
 
       // Set a callback to run when the Google Visualization API is loaded.
       google.setOnLoadCallback(drawChart);
@@ -138,25 +165,68 @@ cat > $PLOT_DIR/$FILE_NAME << EOF
       function drawChart() {
 
         // Create the data table.
-        var data = new google.visualization.DataTable();
-        data.addColumn('string', 'Site');
-        data.addColumn('number', '# of jobs');
-        data.addRows([
+        var data = new google.visualization.DataTable({
 EOF
-#          ['Mushrooms', 3],
-#          ['Onions', 1],
-#          ['Olives', 1],
-for i in $input_data; do
-  echo "         ['${i#*,} (${i%,*})', ${i%,*}],"  >> $PLOT_DIR/$FILE_NAME
-done
+if [ "x$PLOT_TYPE" == "xTreeMap" ]; then
+  cat >> $PLOT_DIR/$FILE_NAME << EOF 
+        cols: [ {id: 'A', label: 'Site', type: 'string'},
+                {id: 'A2', label: 'parent', type: 'string'},
+                {id: 'B', label: '# of jobs', type: 'number'},
+                {id: 'B2', label: 'val2', type: 'number'}],
+        rows: [ {c:[{v: 'Global'}, {v: null}, {v: 0}, {v: 0}]},
+EOF
+  TMP_FILE=`mktemp -u tmp.cplot.XXXXXXXXXX`  
+  for i in $input_data; do
+    echo "         {c:[{v: '${i#*.}'}, {v: 'Global'}, {v: 0}, {v: 0}]},"  >> $TMP_FILE
+    if [ "x$PLOT_LABEL" == "xnumber" ]; then
+      echo "         {c:[{v: '${i#*,}'}, {v: '${i#*.}'}, {v: ${i%,*}}, {v: ${i%,*}}]},"  >> $TMP_FILE
+    else
+      echo "         {c:[{v: '${i#*,}'}, {v: '${i#*.}'}, {v: ${i%,*}}, {v: 0}]},"  >> $TMP_FILE
+    fi
+#    echo "         {c:[{v: '${i#*,}'}, {v: 'Global'}, {v: ${i%,*}}, {v: 0}]},"  >> $PLOT_DIR/$FILE_NAME
+#    echo "         {c:[{v: '${i#*,}'}, {v: '${i#*,}'}, {v: ${i%,*}}, {v: 0}]},"  >> $PLOT_DIR/$FILE_NAME
+  done
+  sort -u $TMP_FILE >> $PLOT_DIR/$FILE_NAME
+  rm $TMP_FILE
+else
+  cat >> $PLOT_DIR/$FILE_NAME << EOF 
+        cols: [ {id: 'A', label: 'Site', type: 'string'},
+                {id: 'B', label: '# of jobs', type: 'number'}],
+        rows: [
+EOF
+  if [ "x$PLOT_LABEL" == "xnumber" ]; then
+    for i in $input_data; do
+      echo "         {c:[{v: '${i#*,} (${i%,*})'}, {v: ${i%,*}}]},"  >> $PLOT_DIR/$FILE_NAME
+    done
+  else
+    for i in $input_data; do
+      echo "         {c:[{v: '${i#*,}'}, {v: ${i%,*}}]},"  >> $PLOT_DIR/$FILE_NAME
+    done
+  fi
+fi
 cat >> $PLOT_DIR/$FILE_NAME << EOF 
-        ]);
+        ]});
 
         // Set chart options
         var options = {'title':'$PLOT_TITLE',
                        'width':$PLOT_WIDTH,
-                       'height':$PLOT_HEIGHT};
+                       'height':$PLOT_HEIGHT,
+EOF
 
+if [ "x$PLOT_TYPE" == "xTreeMap" ]; then
+  cat >> $PLOT_DIR/$FILE_NAME << EOF 
+    //minColor: 'red',
+    minColor: 'yellow',
+    midColor: '#ddd',
+    maxColor: '#0d0',
+    headerHeight: 0,
+    fontColor: 'black',
+    showScale: false,
+EOF
+fi
+
+cat >> $PLOT_DIR/$FILE_NAME << EOF 
+                      };
         // Instantiate and draw our chart, passing in some options.
         var chart = new google.visualization.$PLOT_TYPE(document.getElementById('chart_div'));
         chart.draw(data, options);
