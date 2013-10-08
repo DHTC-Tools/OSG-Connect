@@ -13,8 +13,8 @@ DEFAULT_PLOT_TITLE='eval "echo Distribution for job \$JOB_ID"'
 #DEFAULT_FILE_NAME='eval "echo chart_\${PLOT_TYPE}_\${${JOB_ID}}.html"'
 DEFAULT_FILE_NAME='eval "echo chart_\${PLOT_TYPE}_\${JOB_ID}.html"'
 VALID_PLOT_TYPES="table,pie,bar,tmap"
-COMMAND_PRE="condor_history -format '%s\\n' LastRemoteHost"
-COMMAND_POST=""
+#COMMAND_PRE="condor_history -format '%s ' CommittedTime -format '%s\\n' LastRemoteHost"
+#COMMAND_POST=""
 
 
 function help_msg {
@@ -22,18 +22,21 @@ function help_msg {
   PLOT_TITLE=`eval $DEFAULT_PLOT_TITLE`
   cat << EOF
 $0 [ options ] JOB_ID
+$0 [ options ] -f CONST [ JOB_ID ]
 $0 [ options ] -i FILE [ JOB_ID ]
- Edit $0 to set the default options 
+Options:
  -d DIR   set an alternative output directory (Def: $PLOT_DIR)
  -p PLOT  set the plot type [$VALID_PLOT_TYPES] (Def: pie)
  -n NAME  set a different plot file name (Default: $FILE_NAME)
  -t TITLE set a different title (Default: $PLOT_TITLE)
  -c CUT   cut to the first CUT entries (Default: $PLOT_CUT)
- -l MOD   label modifier [number,plain] (Def: $PLOT_LABEL)
+ -l MOD   label modifier [number,plain,onelevel,domain,validdomain,notime] (Def: $PLOT_LABEL)
  -w WIDTH set width (Default: $PLOT_WIDTH)
  -h HEIGHT set height (Default: $PLOT_HEIGHT)
  -g       group domain names
- -i FILE  get the input from file instead of "condor_history -format '%s\\n' LastRemoteHost JOB_ID" 
+ -i FILE  get the input from file instead of 
+"condor_history -format '%s ' CommittedTime -format '%s\\n' LastRemoteHost JOB_ID" 
+ -f CONST constraints classad to filter jobs (passed to condor_history)" 
  -q       quiet
  -?       print this help message
 Examples:
@@ -46,20 +49,11 @@ EOF
 
 
 # add width/height
-while getopts ?h:w:d:p:n:t:c:gl:i:q option
+while getopts ?h:w:d:p:n:t:c:gl:i:f:q option
 do
   case "${option}"
   in 
   "?") help_msg; exit 0;;
-  "a") 
-     SHOST_PLOTS="yes"
-     VO_PLOTS="yes"
-     FORONTEND_PLOTS="yes"
-     FORONTEND_PLOTS2="yes"
-     ERROR_PLOTS="yes"
-     NEW_PLOTS="yes"
-     NEW_PLOTS2="yes"
-     ;;
   "d") PLOT_DIR=${OPTARG};;
   "p") PLOT_TYPE=${OPTARG};;
   "n") FILE_NAME=${OPTARG};;
@@ -70,6 +64,7 @@ do
   "g") PLOT_GROUP=2;;
   "l") PLOT_LABEL=${OPTARG};;
   "i") INPUT_FILE=${OPTARG};;
+  "f") JOB_CONSTRAINT="-constraint ${OPTARG}";;
   "q") QUIET_RUN=yes;;
   esac
 done
@@ -79,15 +74,20 @@ shift $((OPTIND-1))
 # Check arguments
 if [ -z $1 ]; then
   if [ -z $INPUT_FILE ]; then
-    echo "Missing JOB_ID"
-    help_msg
-    exit 1
+    if [ -z $JOB_CONSTRAINT ]; then
+      echo "Missing JOB_ID"
+      help_msg
+      exit 1
+    else
+      JOB_ID="JobSelection"
+    fi
   else
     JOB_ID="JobFile_`basename $INPUT_FILE`"
   fi
 else
   JOB_ID=$1
 fi
+
 
 # Check paramaters
 if [ -z $FILE_NAME ]; then
@@ -114,35 +114,71 @@ if [ -n $PLOT_TYPE ]; then
   fi
 fi 
 
-# 
+# Return the last 2 substrings in a dot separated string ($1)
+# if $2 == local, return "NA (local)" for all XXXX.local strings
+# if $2 == noloop, return "Global" if $1 has no "." (to avoid loops in TreeMaps
+function filter_domain {
+  NO_REAL_DOMAIN="NA (no valid domain)"
+  if [ "x$2" == "xlocal" ]; then
+    if [ "x${1##*.}" == "xlocal" ]; then
+      echo $NO_REAL_DOMAIN
+      return
+    fi
+    if [ "x${1##*.}" == "x$1" ]; then
+      echo $NO_REAL_DOMAIN
+      return
+    fi
+  fi
+  if [ "x$2" == "xonelevel" ]; then
+    retv=${1#*.}
+  else
+    retv=`echo "..$1" |  sed -r 's/.*([^.]*)\.([^.]*)\.([^.]*)/\2.\3/' | sed 's/^\.*//'`
+  fi
+  if [ "x$retv" == "x$1" ]; then
+    echo "Global"
+    return
+  fi
+  echo "$retv"
+}
+
+## Do the plot
+ 
 if [ -z $QUIET_RUN ];then
   echo "Plotting '$PLOT_TITLE' to $PLOT_DIR/$FILE_NAME (job: $JOB_ID, ${PLOT_WIDTH}x${PLOT_HEIGHT} $PLOT_TYPE)"
 fi
 
+## Retrieve HTCondor history
+
 if [ -z $INPUT_FILE ]; then 
   INPUT_FILE=`mktemp -u tmp.cplot.XXXXXXXXXX`
   TMP_FILE_TODEL=$INPUT_FILE
-  condor_history -format '%s\n' LastRemoteHost $JOB_ID > $INPUT_FILE
-  # | sort -n to sort by number?
-  #input_data=`condor_history -format '%s\\n' LastRemoteHost $JOB_ID | cut -d@ -f2 | sort | uniq -c | sed -r 's/^( *[^ ]+) +/\1,/'`
-  #input_data=`condor_history -format '%s\\n' LastRemoteHost $JOB_ID | cut -d@ -f2 | sort | uniq -c | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
+  condor_history -format '%s ' CommittedTime -format '%s\n' LastRemoteHost $JOB_CONSTRAINT $JOB_ID > $INPUT_FILE 
 fi
 
+## Filter the data (collecting both the counter and the sum of time dome in AWK)
+
 if [ -z $PLOT_GROUP ]; then
-  input_data=`cat $INPUT_FILE | cut -d@ -f2 | sort | uniq -c | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
+  input_data=`cat $INPUT_FILE | sed 's/^0 \(0 \)*//' | awk '{bucket=gensub(/[^@]*@/, "", 1, $2); A[bucket] += $1; C[bucket] ++;} END{for (i in A) {printf "%d.%d %s\n", C[i], A[i], i;}}' | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
 elif [ "x$PLOT_GROUP" == "x2" ]; then
   # same as else branch
-  input_data=`cat $INPUT_FILE | cut -d@ -f2 | sed -r 's/.*([^.]*)\.([^.]*)\.([^.]*)/\2.\3/' | sed 's/^\.*//' | sort | uniq -c | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
+  #input_data=`cat $INPUT_FILE | cut -d@ -f2 | sed -r 's/.*([^.]*)\.([^.]*)\.([^.]*)/\2.\3/' | sed 's/^\.*//' | sort | uniq -c | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
+  input_data=`cat $INPUT_FILE | sed 's/^0 \(0 \)*//' | awk '{prebucket=gensub(/[^@]*@/, "", 1, $2); bucket=gensub(/.*([^.]*)\.([^.]*)\.([^.]+)\.*/, "\\\\2.\\\\3", 1, prebucket); sub(/^\.+/, "", bucket); A[bucket] += $1; C[bucket] ++;} END{for (i in A) {printf "%d.%d %s\n", C[i], A[i], i;}}' | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
+elif [ "x$PLOT_GROUP" == "x3" ]; then
+  input_data=`cat $INPUT_FILE | sed 's/^0 \(0 \)*//' | awk '{prebucket=gensub(/[^@]*@/, "", 1, $2); bucket=gensub(/.*([^.]*)\.([^.]*)\.([^.]+)\.*/, "\\\\1.\\\\2.\\\\3", $0, prebucket); sub(/^\.+/, "", bucket); A[bucket] += $1; C[bucket] ++;} END{for (i in A) {printf "%d.%d %s\n", C[i], A[i], i;}}' | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
 elif [ "x$PLOT_GROUP" == "x1" ]; then
-  input_data=`cat $INPUT_FILE | cut -d@ -f2 | sed -r 's/.*([^.]*)\.([^.]*)\.([^.]*)/\3/' | sed 's/^\.*//' | sort | uniq -c | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
-else
-  input_data=`cat $INPUT_FILE | cut -d@ -f2 | sed -r 's/.*([^.]*)\.([^.]*)\.([^.]*)/\2.\3/' | sed 's/^\.*//' | sort | uniq -c | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
+  input_data=`cat $INPUT_FILE | sed 's/^0 \(0 \)*//' | awk '{prebucket=gensub(/[^@]*@/, "", 1, $2); bucket=gensub(/.*([^.]*)\.([^.]*)\.([^.]+)\.*/, "\\\\3", 1, prebucket); sub(/^\.+/, "", bucket); A[bucket] += $1; C[bucket] ++;} END{for (i in A) {printf "%d.%d %s\n", C[i], A[i], i;}}' | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
+else     # same as 2
+  input_data=`cat $INPUT_FILE | sed 's/^0 \(0 \)*//' | awk '{prebucket=gensub(/[^@]*@/, "", 1, $2); bucket=gensub(/.*([^.]*)\.([^.]*)\.([^.]+)\.*/, "\\\\2.\\\\3", 1, prebucket); sub(/^\.+/, "", bucket); A[bucket] += $1; C[bucket] ++;} END{for (i in A) {printf "%d.%d %s\n", C[i], A[i], i;}}' | sort -nr | head -n $PLOT_CUT | sed -r 's/^( *[^ ]+) +/\1,/'`
   #input_data=`cat $INPUT_FILE`
+  # cat j37311 |sed 's/^0 \(0 \)*//' | awk '{prebucket="..." gensub(/[^@]*@/, "", 1, $2); bucket=gensub(/.*([^.]*)\.([^.]*)\.([^.]*)/, "\\2.\\3", $0, prebucket); A[bucket] += $1; C[bucket] ++; V[bucket]=prebucket;} END{for (i in A) {printf "%d.%d %s (%s)\n", C[i], A[i], i, V[i];}}' | less
 fi
 
 if [ ! -z $TMP_FILE_TODEL ]; then
   rm $TMP_FILE_TODEL
 fi
+
+
+## Print the plot
 
 cat > $PLOT_DIR/$FILE_NAME << EOF 
 <html>
@@ -177,16 +213,31 @@ if [ "x$PLOT_TYPE" == "xTreeMap" ]; then
 EOF
   TMP_FILE=`mktemp -u tmp.cplot.XXXXXXXXXX`  
   for i in $input_data; do
-    echo "         {c:[{v: '${i#*.}'}, {v: 'Global'}, {v: 0}, {v: 0}]},"  >> $TMP_FILE
-    if [ "x$PLOT_LABEL" == "xnumber" ]; then
-      echo "         {c:[{v: '${i#*,}'}, {v: '${i#*.}'}, {v: ${i%,*}}, {v: ${i%,*}}]},"  >> $TMP_FILE
-    else
-      echo "         {c:[{v: '${i#*,}'}, {v: '${i#*.}'}, {v: ${i%,*}}, {v: 0}]},"  >> $TMP_FILE
+    if [ "x$PLOT_LABEL" == "xonelevel" ]; then
+      tmp1=${i#*,}
+      echo "         {c:[{v: '`filter_domain $tmp1 onelevel`'}, {v: 'Global'}, {v: 0}, {v: 0}]},"  >> $TMP_FILE
+      tmp=${i%,*}
+      echo "         {c:[{v: '${i#*,}'}, {v: '`filter_domain $tmp1 onelevel`'}, {v: ${tmp%.*}}, {v:  ${tmp#*.}/${tmp%.*}}]},"  >> $TMP_FILE
+    elif [ "x$PLOT_LABEL" == "xdomain" ]; then 
+      echo "         {c:[{v: '`filter_domain ${i#*,}`'}, {v: 'Global'}, {v: 0}, {v: 0}]},"  >> $TMP_FILE
+      tmp=${i%,*}
+      echo "         {c:[{v: '${i#*,}'}, {v: '`filter_domain ${i#*,}`'}, {v: ${tmp%.*}}, {v:  ${tmp#*.}/${tmp%.*}}]},"  >> $TMP_FILE
+    elif [ "x$PLOT_LABEL" == "xvaliddomain" ]; then
+      echo "         {c:[{v: '`filter_domain ${i#*,} local`'}, {v: 'Global'}, {v: 0}, {v: 0}]},"  >> $TMP_FILE
+      tmp=${i%,*}
+      echo "         {c:[{v: '${i#*,}'}, {v: '`filter_domain ${i#*,} local`'}, {v: ${tmp%.*}}, {v:  ${tmp#*.}/${tmp%.*}}]},"  >> $TMP_FILE
+    elif [ "x$PLOT_LABEL" == "xnotime" ]; then
+      tmp1=${i#*,}
+      echo "         {c:[{v: '`filter_domain $tmp1 onelevel`'}, {v: 'Global'}, {v: 0}, {v: 0}]},"  >> $TMP_FILE
+      tmp=${i%,*}
+      echo "         {c:[{v: '${i#*,}'}, {v: '`filter_domain $tmp1 onelevel`'}, {v: ${tmp%.*}}, {v: 0}]},"  >> $TMP_FILE
+    else     # same as validdomain
+      echo "         {c:[{v: '`filter_domain ${i#*,} local`'}, {v: 'Global'}, {v: 0}, {v: 0}]},"  >> $TMP_FILE
+      tmp=${i%,*}
+      echo "         {c:[{v: '${i#*,}'}, {v: '`filter_domain ${i#*,} local`'}, {v: ${tmp%.*}}, {v:  ${tmp#*.}/${tmp%.*}}]},"  >> $TMP_FILE
     fi
-#    echo "         {c:[{v: '${i#*,}'}, {v: 'Global'}, {v: ${i%,*}}, {v: 0}]},"  >> $PLOT_DIR/$FILE_NAME
-#    echo "         {c:[{v: '${i#*,}'}, {v: '${i#*,}'}, {v: ${i%,*}}, {v: 0}]},"  >> $PLOT_DIR/$FILE_NAME
   done
-  sort -u $TMP_FILE >> $PLOT_DIR/$FILE_NAME
+  sort -u $TMP_FILE | grep -ve "^         {c:\[{v: 'Global'}, {v: 'Global'}," >> $PLOT_DIR/$FILE_NAME
   rm $TMP_FILE
 else
   cat >> $PLOT_DIR/$FILE_NAME << EOF 
@@ -196,11 +247,13 @@ else
 EOF
   if [ "x$PLOT_LABEL" == "xnumber" ]; then
     for i in $input_data; do
-      echo "         {c:[{v: '${i#*,} (${i%,*})'}, {v: ${i%,*}}]},"  >> $PLOT_DIR/$FILE_NAME
+      tmp=${i%,*}
+      echo "         {c:[{v: '${i#*,} (${tmp%.*})'}, {v: ${tmp%.*}}]},"  >> $PLOT_DIR/$FILE_NAME
     done
   else
     for i in $input_data; do
-      echo "         {c:[{v: '${i#*,}'}, {v: ${i%,*}}]},"  >> $PLOT_DIR/$FILE_NAME
+      tmp=${i%,*}
+      echo "         {c:[{v: '${i#*,}'}, {v: ${tmp%.*}}]},"  >> $PLOT_DIR/$FILE_NAME
     done
   fi
 fi
@@ -215,13 +268,14 @@ EOF
 
 if [ "x$PLOT_TYPE" == "xTreeMap" ]; then
   cat >> $PLOT_DIR/$FILE_NAME << EOF 
-    //minColor: 'red',
-    minColor: 'yellow',
+    //green
+    minColor: '#0d0',
     midColor: '#ddd',
-    maxColor: '#0d0',
+    //maxColor: 'red',
+    maxColor: 'yellow',
     headerHeight: 0,
     fontColor: 'black',
-    showScale: false,
+    showScale: true,
 EOF
 fi
 
