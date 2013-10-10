@@ -1,0 +1,4 @@
+10 1,7,13,19 * * * /var/lib/gwms-frontend/make-proxy.sh --no-voms-proxy
+10 1,7,13,19 * * * /var/lib/gwms-frontend/make-proxy-glidein.sh
+10 1 * * * /var/lib/gwms-frontend/make-proxy-control.sh
+10 * * * * /var/lib/gwms-frontend/download-gratia-graphs
