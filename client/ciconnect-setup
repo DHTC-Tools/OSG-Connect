@@ -1,0 +1,10 @@
+#!/bin/bash
+if [ "x$1" == "x" ]; then
+  echo "Missing user name on login.osgconnect.net."
+  echo "Usage: $0 USERNAME"
+  exit 1
+fi
+
+bosco_cluster --add ${1}@login.osgconnect.net condor
+
+

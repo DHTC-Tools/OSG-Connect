@@ -1,0 +1,19 @@
+#! /bin/bash
+
+if [ "x$1" == "x" ]; then
+  echo "Missin command"
+  echo "Usage: $0 COMMAND [OPTIONS] [ARGUMENTS]"
+  echo "Usage: $0 SCRIPT SCRIPTPATH (the first is the keyword, the second is a path)"
+  exit 1
+fi
+
+remote_host=`bosco_cluster --list host | grep osgconnect.net 2> /dev/null`
+if [ "x$remote_host" == "x" ]; then
+  echo "Missing connected cluster. Aborting."
+  echo "Try to run ${0}-setup and then rerun the command."
+  exit 1
+fi
+ 
+bosco_cluster -c $remote_host "$@"
+
+
