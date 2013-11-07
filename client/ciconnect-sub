@@ -1,0 +1,236 @@
+#! /bin/bash
+# First version by Marco Mambelli - marco@hep.uchicago.edu
+# Submit a COMMAND to a remote HTCondor cluster (osg-connect, osx-xsede, BOSCO)
+# Or copy and run a local script located at SCRIPTPATH
+
+# Reserved file names
+CIC_WRAPPER=ciconnect_aux.sh
+CIC_FILELIST=ciconnect_aux_filelist.csv
+CIC_HTSUB=htsub
+CIC_ARCHIVE=ciconnect_archive.tgz
+#TODO: handle optional user script to run after job completion 
+CIC_POST_WRAPPER=ciconnect_post.sh
+
+function usage {
+  echo "Submit remotely a job"
+  echo << EOF
+Usage: $0 [options] executable [options/arguments for the executable]
+
+Options:
+  -h, --help            show this help message and exit
+  -i INPUT, --input=INPUT
+                        Standard input for the job
+  --infiles=INFILES     Additional input files or directories for the job 
+                        (comma separated list). Directory trees are copied recursively
+                        The content of the directory is copied for names ending in '/'
+                        Links are followed only if they appear in the list 
+  -o OUTPUT, --output=OUTPUT
+                        Standard output for the job
+  -e ERROR, --error=ERROR
+                        Standard error for the job
+  --outfiles=OUTFILES   Additional output files for the job (comma separated
+                        list)
+  -l LOGFILE, --log=LOGFILE
+                        Log file for the job
+  -d DIRECTORY, --directory=DIRECTORY
+                        Directory for the relative paths
+  --local-executable    Set to run a command/executable local to the remote
+                        cluster
+  -a ARGUMENTS, --arguments=ARGUMENTS
+                        Job arguments
+  -r REQUIREMENTS, --requirements=REQUIREMENTS
+                        Job requirements
+  -n QUEUE, --ntasks=QUEUE
+                        Number of jobs to send
+  -m MAIL, --mail-user=MAIL
+                        Send email notification
+  -v, --verbose, --debug
+                        Print verbose output
+  --loglevel=LOGLEVEL   Set logging level (DEBUG, INFO, WARNING, ERROR,
+                        CRRITICAL)
+
+NOTE that input files path are on this submit host, output files paths are on 
+the remote machine and will not be copied back
+
+NOTE2 you cannot use the following names for your input file names (unless you 
+put them in a imported directory tree): 
+$CIC_WRAPPER, $CIC_FILELIST, $CIC_ARCHIVE, $CIC_HTSUB
+
+NOTE3 you must escape spaces in the file names 
+EOF
+}
+
+if [[ "x$1" = "x" ]]; then
+  echo "Missing executable"
+  usage
+  exit 1
+fi
+if [[ "x$1" = "x-?"  ||  "x$1" = "x-h"  ||  "x$1" = "x--help" ]]; then
+  usage
+  exit 0
+fi
+
+
+remote_host=`bosco_cluster --list host | grep osgconnect.net 2> /dev/null`
+if [ "x$remote_host" == "x" ]; then
+  echo "Missing connected cluster. Aborting."
+  echo "Try to run ${0}-setup and then rerun the command."
+  exit 1
+fi
+
+function processlong {
+  opt_name=${1%%=*}
+  opt_val=${1#*=}
+  case $opt_name in
+    local-executable)
+      LOCAL_EXECUTABLE=yes
+      ;;
+    infiles)
+      INFILE_LIST="$opt_val"
+      ;;
+    input)
+      STDINFILE="$opt_val"
+      ;;
+    directory)
+      FILE_DIR="$opt_val"
+      ;;
+    verbose|debug)
+      IS_VERBOSE=yes
+      ;;
+  esac
+} 
+
+while getopts “i:d:-:v” OPTION
+do
+  case $OPTION in
+    i)
+      STDINFILE="$OPTARG"            
+      ;;
+    d)
+      FILE_DIR=$OPTARG
+      ;;
+    v)
+      IS_VERBOSE=yes
+      ;;
+    -)
+      processlong $OPTARG
+      ;;
+  esac
+done
+
+OVERRIDE_OPTIONS=""
+
+
+# Adjusting adding input file
+if [ -n $STDINFILE ]; then
+  if [ ! "x$FILE_DIR" == "x" ]; then
+    STDINFILE="$FILE_DIR/$STDINFILE"
+  fi
+  OVERRIDE_OPTIONS="--override-input=\"`basename $STDINFILE`\" $OVERRIDE_OPTIONS"  
+fi
+
+
+############
+# Prepare the bundle directory
+
+tmpdir=`mktemp -d tmp_ciconnect_job.XXXXXX`
+
+#TODO: Think of pro/contra of putting files (infiles, input, output, erroro, log) in subdirectory
+
+# Copy input files and prepare the updated list
+if [ ! "x${INFILE_LIST//,/}" == "x" ]; then   # -n would miss when the list contains only ','
+  echo "$INFILE_LIST,$tmpdir/" | sed "s/,/ /g" | xargs cp -RH
+  new_infiles_list=`ls $tmpdir/ | tr "\\n" "," | sed 's/,*$//'`
+  OVERRIDE_OPTIONS="--override-infiles=\"$new_infiles_list\" $OVERRIDE_OPTIONS"  
+fi
+
+# Prepare executable (if sent), all the files, file list and wrapper script 
+if [ -z $LOCAL_EXECUTABLE ]; then
+  # select the file or look for it on the PATH and add it to the files to copy
+  eval my_exec="\$${OPTIND}"
+  if [ -f $my_exec ]; then
+    EXECUTABLE_FILE="$my_exec"
+  else  
+    EXECUTABLE_FILE="`which $my_exec`"
+    if [ $? -ne 0 ]; then
+      echo "The executable ($my_exec) is not a valid file and is not in your path. Aborting."
+      echo "Please check your command line. Use the option '--local-executable' if the"
+      echo "the executable is available on the remote node (and you don't want to transfer it)."
+      exit 1
+    fi
+  fi 
+  OVERRIDE_OPTIONS="--override-executable=\"`basename $EXECUTABLE_FILE`\" $OVERRIDE_OPTIONS"
+fi
+
+htsub_path=`which htsub`
+if [ $? -ne 0 ]; then
+  echo "htsub is not in your path. Aborting."
+  echo "Try to run ${0}-setup and then rerun the command."
+  exit 1
+fi
+
+# Copy all remaining files to the bundle directory, including htsub, input and the executable 
+echo "$htsub_path,$STDINFILE,$EXECUTABLE_FILE,$tmpdir/" | sed "s/,/ /g" | xargs cp -RH
+chmod +x $tmpdir/htsub
+# Make sure that the executable has the right permission
+if [ -n $EXECUTABLE_FILE ];then
+  chmod +x $tmpdir/`basename $EXECUTABLE_FILE`
+fi
+
+pushd $tmpdir >/dev/null 2>&1
+
+# Prepare wrapper script and make it executable
+cat << EOF_wrapper >  $CIC_WRAPPER
+#!/bin/bash
+# ciconnect wrappwer script generated by ciconnect-sub 
+# assuming that:
+# 1. job will start in a temporary directory with all input files 
+# 2. remote directory will be cleaned up by someone else after the job 
+# To modify this script and add some preparation/cleanup you must change
+# ciconnect-sub
+
+./htsub $OVERRIDE_OPTIONS --universe=vanilla $@
+
+EOF_wrapper
+chmod +x $CIC_WRAPPER
+
+
+############
+# Cerate job bundle and run command (to send and execute the bundle)
+
+#new_files_list=`ls | grep -v $CIC_WRAPPER | grep -v $CIC_FILELIST | grep -v $CIC_HTSUB | tr "\\n" "," | sed 's/,*$//'`
+#echo "$CIC_WRAPPER,$CIC_FILELIST,$CIC_HTSUB,$new_files_list" | sed "s/,/ /g" | xargs tar -cvzf $CIC_ARCHIVE  >/dev/null 2>&1
+ls | xargs tar -cvzf $CIC_ARCHIVE >/dev/null 2>&1
+
+
+if [ ! -f "$CIC_ARCHIVE" ]; then
+  echo "Failed to create job bundle. Aborting."
+  echo "Check that there is enough space on disk."
+  popd 
+  echo "Leaving temp dir. Use 'rm -rf $tmpdir' to remove it."
+  exit 1
+fi
+
+if [ ! -z $IS_VERBOSE ]; then
+  echo "Sending the files to $remote_host and submitting the job $my_exec2"
+  # Detailed info
+  echo "Files sent: $new_infiles_list $STDINFILE"
+  echo "Aux files: $CIC_WRAPPER,$CIC_HTSUB"
+  echo "Command: ./htsub $OVERRIDE_OPTIONS --universe=vanilla $@"
+  echo
+fi
+
+cmd_out=`bosco_cluster -c $remote_host URARCHIVE $CIC_ARCHIVE $CIC_WRAPPER $@ 2>/dev/null`
+if [ $? -ne 0 ]; then
+  echo "The remote job submission failed. Check that HTCondor or BOSCO"
+  echo "are installed on the remote system and working correctly."
+  exit 1
+fi
+
+echo -e "$cmd_out"
+
+#############
+# Cleanup
+popd >/dev/null 2>&1
+rm -rf $tmpdir
+

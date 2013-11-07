@@ -176,6 +176,55 @@ start_ssh () {
 
 }    
 
+ssh_upload_archive_and_run () {
+    # upload_and_run remote_host command start_dir
+    # 1. remote host
+    # 2. start dir DEFAULT to use a temporary directory removed afterwards
+    # 3. script name
+    # All other arguments are sent on
+    remote_host=$1
+    start_dir=$2
+    local_archive=$3
+    shift 3
+    if [ "x$1" == "x" ]; then
+      start_script="bosco_run"
+    else
+      start_script=$1
+      shift
+    fi
+    # TODO: suppress banner printout  -o LogLevel=Error  does not work, 
+    # redirect stderr to /dev/null suppresses errors as well
+    if [ "x$start_dir" == "xDEFAULT" ]; then
+        # OS X mktemp requires a template
+        start_dir=`ssh -o ControlMaster=auto -o "ControlPath=$ssh_control_path" $remote_host "mktemp -d /tmp/tmp_bosco_probe.XXXXXXXX" 2>/dev/null` 
+    else
+        ssh -o ControlMaster=auto -o "ControlPath=$ssh_control_path" $remote_host "mkdir -p $start_dir" 
+    fi
+    scp -o ControlMaster=auto -o "ControlPath=$ssh_control_path" $local_archive $remote_host:$start_dir/bosco_archive.tgz
+    cmd_out=`ssh -o ControlMaster=auto -o "ControlPath=$ssh_control_path" $remote_host "cd $start_dir; tar xzf ./bosco_archive.tgz; chmod +x $start_script; ./$start_script $@"  2>/dev/null`
+    #cmd_out=`ssh $remote_host "cd $start_dir; chmod +x bosco_run; ./bosco_run $4 $5 $6"`
+    cmd_ec=$?
+    if [ $cmd_ec -eq 0 ]; then
+        # output only if successful
+        echo "$cmd_out"
+    else
+        echo "ERROR (ec $cmd_ec):"
+        echo "$cmd_out"
+    fi
+    if [ "x$start_dir" == "xDEFAULT" ]; then
+        pwd
+        #MMDB
+        #ssh -o ControlMaster=auto -o "ControlPath=$ssh_control_path" $remote_host "rm -r $start_dir"
+    fi        
+    return $cmd_ec
+
+
+# bosco_run is the script invoked (or parameter?)
+# add htsub -b
+}
+
+
+
 ssh_upload_and_run () {
     # upload_and_run remote_host command start_dir
     # 1. remote host
@@ -508,7 +557,7 @@ do_cluster_command () {
     # $1 remote_host (user@fqdn) [or SCRIPT - all parameters moved down]
     # $2, ... command
 
-   if [ "x$1" != "x" ]; then
+    if [ "x$1" != "x" ]; then
         remote_host=$1
         shift
     else
@@ -516,9 +565,15 @@ do_cluster_command () {
         exit 1
     fi
     # Check optional script parameter
-    if [ "x$1" == "xSCRIPT" ]; then
-        do_script="yes"
+    if [ "x$1" == "xURARCHIVE" ]; then
+        do_script="urarchive"
         shift
+    elif [ "x$1" == "xSCRIPT" ]; then
+        do_script="script"
+        shift
+    elif [ "x$1" == "xUPLOAD" ]; then
+        do_script="upload"
+        shift        
     fi
  
     # needs $remote_host set
@@ -529,13 +584,20 @@ do_cluster_command () {
         echo -n "Running command ($@) via ssh to $remote_host..."
         ssh_out=`ssh -o "PasswordAuthentication=no" -o ControlMaster=auto -o "ControlPath=$ssh_control_path" $remote_host "$@"`
         ssh_exit=$?
-    else
+    elif  [ "x$do_script" == "xupload" ]; then
+        echo -n "Uploading file ($1) to $remote_host..."
+        ssh_out=`scp -o ControlMaster=auto -o "ControlPath=$ssh_control_path" $1 $remote_host:`
+        ssh_exit=$?
+    elif  [ "x$do_script" == "xurarchive" ]; then
+        echo -n "Uploading and running $1 on  $remote_host..."
+        ssh_out=`ssh_upload_archive_and_run $remote_host DEFAULT "$@"`
+        ssh_exit=$?
+    else        # do_script == script
         echo -n "Uploading and running $1 on  $remote_host..."
         ssh_out=`ssh_upload_and_run $remote_host DEFAULT "$@"`
         ssh_exit=$?
-
     fi
- 
+
     stop_ssh
 
     if [ $ssh_exit -ne 0 ]; then
@@ -543,9 +605,7 @@ do_cluster_command () {
         echo "Passwordless ssh to $remote_host is not working."
         exit 1
     else
-        echo   # "OK!"
-        #echo "Output1:"
-        #print "$ssh_out"
+        #echo   # "OK!"
         echo "Output:"
         echo -e "$ssh_out"
     fi

@@ -72,6 +72,18 @@ SUBMIT_GRID="""universe = grid
 queue %(queue)s
 """
 
+SUBMIT_VANILLA="""universe = vanilla
+%(job_str)s
+%(file_str)s
+queue %(queue)s
+"""
+
+SUBMIT_OTHER="""universe = %(universe)s
+%(job_str)s
+%(file_str)s
+queue %(queue)s
+"""
+
 # Prefix used in default file names (stdout, stderr, log, ...)
 # htjob, bosco, condor, ...
 FILE_PREFIX='htjob'
@@ -124,8 +136,11 @@ def make_submit_file(options, args):
         job_str = "grid_resource = %s" % out
     if options.local:
         job_str = "%s\ntransfer_executable = False" % job_str
-    if args:
-        job_str = "%s\nexecutable = %s" % (job_str, args[0])
+    if options.override_executable:
+        job_str = "%s\nexecutable = %s" % (job_str, options.override_executable)
+    else:
+        if args:
+            job_str = "%s\nexecutable = %s" % (job_str, args[0])
     if options.arguments:
         job_str = "%s\narguments = %s" % (job_str, options.arguments)
     else:
@@ -134,7 +149,15 @@ def make_submit_file(options, args):
     # Fill the template
     if not options.queue:
         options.queue = ''
-    rets = SUBMIT_GRID % dict(job_str=job_str, file_str=file_str, queue=options.queue)
+    if not options.universe:
+        rets = SUBMIT_GRID % dict(job_str=job_str, file_str=file_str, queue=options.queue)
+    else:
+        if options.universe=='vanilla':
+            rets = SUBMIT_VANILLA % dict(job_str=job_str, file_str=file_str, queue=options.queue)
+        elif options.universe=='bosco' or options.universe=='grid':
+            rets = SUBMIT_GRID % dict(job_str=job_str, file_str=file_str, queue=options.queue)
+        else:
+            rets = SUBMIT_OTHER % dict(universe=options.universe, job_str=job_str, file_str=file_str, queue=options.queue)
     return rets
 
 
@@ -191,6 +214,12 @@ if __name__ == "__main__" :
     #    help='literal interpretation', action="store_true", default=False)
     parser.add_option("-i", "--input", dest="input",
         help='Standard input for the job', action="store", default=None)
+    parser.add_option("--override-input", dest="override_input",
+        help='Overrides input option for ease of programming', action="store", default=None)    
+    parser.add_option("--override-executable", dest="override_executable",
+        help='Overrides the executable for ease of programming', action="store", default=None)    
+    parser.add_option("--override-infiles", dest="override_infiles",
+        help='Overrides infiles option for ease of programming (comma separated list)', action="store", default=None)    
     parser.add_option("--infiles", dest="infiles",
         help='Additional input files for the job (comma separated list)', action="store", default=None)
     parser.add_option("-o", "--output", dest="output",
@@ -205,6 +234,8 @@ if __name__ == "__main__" :
         help='Directory for the relative paths', action="store", default=None)
     parser.add_option("--local-executable", dest="local",
         help='Set to run a command/executable local to the remote cluster', action="store_true", default=False)
+    parser.add_option("-b", "--base-dir", dest="base_dir",
+        help='Replace base directory for all input files, 0 to keep basename', action="store", default=None)
     parser.add_option("-a", "--arguments", dest="arguments",
         help='Job arguments', action="store", default=None)
     parser.add_option("-r", "--requirements", dest="requirements",
@@ -217,6 +248,8 @@ if __name__ == "__main__" :
         help="Print verbose output", action="store_true", default=False)
     parser.add_option("--compat11", dest="compat11",
         help="Bosco 1.1 compatibility", action="store_true", default=False)
+    parser.add_option("--universe", dest="universe",
+        help="Set HTCondor universe (vanilla, grid) DEFAULT:grid", action="store", default=None)
     parser.add_option("--loglevel", dest="loglevel",
         help="Set logging level (DEBUG, INFO, WARNING, ERROR, CRRITICAL)", action="store", default=None)
     (options, args) = parser.parse_args()
@@ -236,8 +269,45 @@ if __name__ == "__main__" :
             logger.setLevel(logging.DEBUG)
         else:
             logger.setLevel(logging.ERROR)
-
-
+    # Check override options
+    if options.override_infiles:
+        options.infiles  = options.override_infiles
+    if options.override_input:
+        options.input  = options.override_input
+    if options.local:
+        if options.override_executable:
+            log("Option 'override-executable' incompatible with option 'local-executable'. Resetting 'override-executable'")
+            options.override_executable = None
+    # Fix all the paths of input files (input, infiles ?and executable?) if base_dir is set
+    if options.base_dir:
+      if options.directory:
+        log("Option 'base directory' (-b) resets option 'directory' (-d).")
+        options.directory = None
+      if options.base_dir=="0":
+        # 0 to strip the directory
+        if options.input:
+          options.input = os.path.basename(options.input)
+        if options.output:
+          options.output = os.path.basename(options.output)
+        if options.error:
+          options.error = os.path.basename(options.error)
+        if options.logfile:
+          options.logfile = os.path.basename(options.logfile)
+        if options.infiles:
+          options.infiles = ",".join([ os.path.basename(i) for i in options.infiles.split(',') ])
+      else:
+        options.base_dir = os.path.abspath(options.base_dir)
+        if options.input:
+          options.input = os.path.join(options.base_dir, options.input)
+        if options.output:
+          options.output = os.path.join(options.base_dir, options.output)
+        if options.error:
+          options.error = os.path.join(options.base_dir, options.error)
+        if options.logfile:
+          options.logfile = os.path.join(options.base_dir, options.logfile)
+        if options.infiles:
+          options.infiles = ",".join([ os.path.join(options.base_dir, i) for i in options.infiles.split(',') ])
+ 
 
     #main(sys.argv)
     do_all(options, args)
