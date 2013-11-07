@@ -1,11 +1,25 @@
 #! /bin/bash
+# First version by Marco Mambelli - marco@hep.uchicago.edu
+# Run a remote COMMAND
+# Or copy and run a local script located at SCRIPTPATH
 
-if [ "x$1" == "x" ]; then
-  echo "Missin command"
+function usage {
+  echo "Run a remote COMMAND"
+  echo "Or copy and run a local script located at SCRIPTPATH"
   echo "Usage: $0 COMMAND [OPTIONS] [ARGUMENTS]"
   echo "Usage: $0 SCRIPT SCRIPTPATH (the first is the keyword, the second is a path)"
+}
+
+if [[ "x$1" = "x" ]]; then
+  echo "Missing command"
+  usage
   exit 1
 fi
+if [[ "x$1" = "x-?"  ||  "x$1" = "x-h"  ||  "x$1" = "x--help" ]]; then
+  usage
+  exit 0
+fi
+
 
 remote_host=`bosco_cluster --list host | grep osgconnect.net 2> /dev/null`
 if [ "x$remote_host" == "x" ]; then

@@ -1,9 +1,17 @@
 #!/bin/bash
-if [ "x$1" == "x" ]; then
+# First version by Marco Mambelli - marco@hep.uchicago.edu
+
+if [[ "x$1" = "x" ]]; then
   echo "Missing user name on login.osgconnect.net."
   echo "Usage: $0 USERNAME"
   exit 1
 fi
+if [[ "x$1" = "x-?"  ||  "x$1" = "x-h"  ||  "x$1" = "x--help" ]]; then
+  echo "Connect to your account on login.osgconnect.net"
+  echo "Usage: $0 USERNAME"
+  exit 0
+fi
+
 
 bosco_cluster --add ${1}@login.osgconnect.net condor
 
