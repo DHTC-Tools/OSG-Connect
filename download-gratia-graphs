@@ -1,27 +1,24 @@
 #!/bin/bash
 # Initial version by Mats Rynge
 # Modified by Marco Mambelli - marco@hep.uchciago.edu
+# Modified Modified by Lincoln Bryant - lincolnb@hep.uchicago.edu
 
 #############################################################################
 #
 # settings
 #
 
-DATA_DIR=/data/gratia/gratia-summary/data
+DATA_DIR=/stash/gratia/gratia-summary/data
 #DATA_DIR=/var/www/html/gratia-summary/data
 
 BASE_URL="http://gratiaweb.grid.iu.edu/gratia"
 VO_ALL="osg|OSG|OSG-Connect"
 VO="OSG-Connect"
-# Set to the hostname of the host running the probe (frontend or submit host)
-#SUBMIT_HOST_PROBE="login01.osgconnect.net"
-SUBMIT_HOST_PROBE=".*connect.*"
-# Set to the user used in the GWMS Frontend (from the frontend configuration)
+SUBMIT_HOST_PROBE="duke.ci-connect.*" # change for each Connect instance
 #GLIDEIN_USER="fechicago"
 GLIDEIN_USER="xsede-pilot"
-# For the query about the submit host you want to include all jobs, also the ones not 
-# executed via the frontend
 GLIDEIN_USER2=".*"
+CONNECT_SITE="duke" # change for each Connect instance
 
 # Uncomment to include plots
 SHOST_PLOTS="yes"
@@ -31,22 +28,6 @@ SHOST_PLOTS="yes"
 ERROR_PLOTS="yes"
 NEW_PLOTS="yes"
 #NEW_PLOTS2="yes"
-
-
-
-####### Example configuration for a GWMS Frontend (uc3-vofe)
-# VO_ALL="UC3|uc3"
-# VO=$VO_ALL
-# SUBMIT_HOST_PROBE="uc3-vofe.uchicago.edu"
-# GLIDEIN_USER="feuc3"
-# GLIDEIN_USER2=$GLIDEIN_USER
-#
-# SHOST_PLOTS="yes"
-# ERROR_PLOTS="yes"
-# FORONTEND_PLOTS="yes"
-# #all other plots commented
-
-
 
 function help_msg {
   cat << EOF
@@ -94,7 +75,12 @@ READABLE_DATE=`TZ=America/Chicago /bin/date`
 
 echo "Downloading data for $START_DATE_YEAR to $END_DATE"
 
-cd $DATA_DIR
+# make sure the data directory exists
+if [ ! -d "$DATA_DIR/$CONNECT_SITE" ]; then
+	mkdir $DATA_DIR/$CONNECT_SITE
+fi
+
+cd $DATA_DIR/$CONNECT_SITE
 
 function include_graph()
 {
@@ -107,13 +93,13 @@ function include_graph()
     wget -q -O $filename "$graph_url"
     if [ $? != 0 ]; then
         echo "FAILED: $graph_url"
-        cp ../nodata_text.png $filename
+        cp ../../nodata_text.png $filename
     fi
 
-    cat >>index.html.new <<EOF
+    cat >>gratia-$CONNECT_SITE.html.new <<EOF
   <tr>
     <td>
-      <img src='data/$filename'>
+      <img src='data/$CONNECT_SITE/$filename'>
     </td>
     <td>
       $description 
@@ -125,7 +111,7 @@ EOF
 }
 
 
-cat >index.html.new <<EOF
+cat >gratia-$CONNECT_SITE.html.new <<EOF
 <html>
   <head>
     <title>Gratia Summary Graphs</title>
@@ -226,10 +212,10 @@ if [ ! -z $NEW_PLOTS2 ]; then
    "$BASE_URL/cumulative_graphs/facility_success_cumulative_smry?facility=.*&probe=$SUBMIT_HOST_PROBE&resource-type=BatchPilot&vo=.*&user=.*&endtime=$END_DATE+23%3A59%3A59&exclude-vo=Unknown|unknown|other&includeFailed=true&exclude-role=NONE&span=86400&role=.*&starttime=$START_DATE_MONTH%2000:00:00&exclude-facility=NONE|Generic|Obsolete&exclude-user=NONE&includeSuccess=true&exclude-projectname=unknown|other"
 fi
 
-echo >>index.html.new <<EOF
+echo >>gratia-$CONNECT_SITE.html.new <<EOF
 </table>
 </body>
 </html>
 EOF
-mv index.html.new ../index.html
+mv gratia-$CONNECT_SITE.html.new ../../gratia-$CONNECT_SITE.html
 
