@@ -1,0 +1,3 @@
+#!/bin/bash
+USER=$1
+condor_q -run "$@" | grep -v "ID" | grep -v "osgconnect.net" | grep -v "?????" | cut -d'@' -f2 | rev | cut -d'.' -f1,2 | rev | sed -e 's/qgp[0-9][0-9]\|lqcd[0-9][0-9]\|neutrino-[0-9][0-9]\|neuron-[0-9][0-9]\|neutron-[0-9][0-9]\|nano[0-9][0-9]/duke.edu/' | sed -e 's/compute-[0-9][0-9]-[0-9][0-9]\.local[0-9]\|compute-[0-9]-[0-9][0-9].nysu[0-9]/uconn.edu/' | sed -e 's/nodo[0-9][0-9]/cinvestav.mx/' | sed -e 's/compute-[0-9]-[0-9].local/vt.edu/' | sed -e 's/node[0-9][0-9][0-9].local/unesp.br/' | sed -e 's/compute-[0-9]-[0-9][0-9].nys1\|compute-[0-9]-[0-9].nys1\|compute-[0-9]-[0-9][0-9].local/cornell.edu/' | distribution --color --char=pb
