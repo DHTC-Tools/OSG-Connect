@@ -218,16 +218,22 @@ if __name__ == "__main__" :
         help='Overrides input option for ease of programming', action="store", default=None)    
     parser.add_option("--override-executable", dest="override_executable",
         help='Overrides the executable for ease of programming', action="store", default=None)    
-    parser.add_option("--override-infiles", dest="override_infiles",
-        help='Overrides infiles option for ease of programming (comma separated list)', action="store", default=None)    
     parser.add_option("--infiles", dest="infiles",
         help='Additional input files for the job (comma separated list)', action="store", default=None)
+    parser.add_option("--override-infiles", dest="override_infiles",
+        help='Overrides infiles option for ease of programming (comma separated list)', action="store", default=None)    
     parser.add_option("-o", "--output", dest="output",
         help='Standard output for the job', action="store", default=None)
+    parser.add_option("--override-output", dest="override_output",
+        help='Overrides output option for ease of programming', action="store", default=None)    
     parser.add_option("-e", "--error", dest="error",
         help='Standard error for the job', action="store", default=None)
+    parser.add_option("--override-error", dest="override_error",
+        help='Overrides error option for ease of programming', action="store", default=None)    
     parser.add_option("--outfiles", dest="outfiles",
         help='Additional output files for the job (comma separated list)', action="store", default=None)
+    parser.add_option("--override-outfiles", dest="override_outfiles",
+        help='Overrides outfiles option for ease of programming', action="store", default=None)    
     parser.add_option("-l", "--log", dest="logfile",
         help='Log file for the job', action="store", default=None)
     parser.add_option("-d", "--directory", dest="directory",
@@ -274,6 +280,10 @@ if __name__ == "__main__" :
         options.infiles  = options.override_infiles
     if options.override_input:
         options.input  = options.override_input
+    if options.override_outfiles:
+        options.outfiles  = options.override_outfiles
+    if options.override_output:
+        options.output  = options.override_output
     if options.local:
         if options.override_executable:
             log("Option 'override-executable' incompatible with option 'local-executable'. Resetting 'override-executable'")

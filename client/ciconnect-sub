@@ -3,6 +3,7 @@
 # Submit a COMMAND to a remote HTCondor cluster (osg-connect, osx-xsede, BOSCO)
 # Or copy and run a local script located at SCRIPTPATH
 
+CIC_SETUP=ciconnect-setup   #${0}-setup
 # Reserved file names
 CIC_WRAPPER=ciconnect_aux.sh
 CIC_FILELIST=ciconnect_aux_filelist.csv
@@ -10,6 +11,10 @@ CIC_HTSUB=htsub
 CIC_ARCHIVE=ciconnect_archive.tgz
 #TODO: handle optional user script to run after job completion 
 CIC_POST_WRAPPER=ciconnect_post.sh
+
+CIC_WEBDIR_BASE="\$HOME/data/public/jobs"
+WEBOPTION=No
+
 
 function usage {
   echo "Submit remotely a job"
@@ -34,6 +39,8 @@ Options:
                         Log file for the job
   -d DIRECTORY, --directory=DIRECTORY
                         Directory for the relative paths
+  --web=OPTION          Save all files (all) or log+stdout/err (log) on the web 
+                        folder
   --local-executable    Set to run a command/executable local to the remote
                         cluster
   -a ARGUMENTS, --arguments=ARGUMENTS
@@ -74,7 +81,7 @@ fi
 remote_host=`bosco_cluster --list host | grep osgconnect.net 2> /dev/null`
 if [ "x$remote_host" == "x" ]; then
   echo "Missing connected cluster. Aborting."
-  echo "Try to run ${0}-setup and then rerun the command."
+  echo "Try to run ${CIC_SETUP} and then rerun the command."
   exit 1
 fi
 
@@ -90,6 +97,9 @@ function processlong {
       ;;
     input)
       STDINFILE="$opt_val"
+      ;;
+    web)
+      WEBOPTION="$opt_val"
       ;;
     directory)
       FILE_DIR="$opt_val"
@@ -144,6 +154,13 @@ if [ ! "x${INFILE_LIST//,/}" == "x" ]; then   # -n would miss when the list cont
   OVERRIDE_OPTIONS="--override-infiles=\"$new_infiles_list\" $OVERRIDE_OPTIONS"  
 fi
 
+#TODO: override output and outfiles
+if [ "x$WEBOPTION" == "xlog" ]; then
+  echo 
+fi
+
+
+
 # Prepare executable (if sent), all the files, file list and wrapper script 
 if [ -z $LOCAL_EXECUTABLE ]; then
   # select the file or look for it on the PATH and add it to the files to copy
@@ -177,6 +194,20 @@ if [ -n $EXECUTABLE_FILE ];then
   chmod +x $tmpdir/`basename $EXECUTABLE_FILE`
 fi
 
+if [ ! "x$WEBOPTION"=="xNo" ]; then
+  WEBDIR_BASE=$CIC_WEBDIR_BASE/`date "+%Y-%m-%d`/\$TMP_WEB  
+  case $WEBOPTION in
+    all)
+      OVERRIDE_OPTIONS="--override-output $ $OVERRIDE_OPTIONS"
+      STDINFILE="$OPTARG"            
+      ;;
+    d)
+      FILE_DIR=$OPTARG
+      ;;
+ 
+  esac
+fi
+
 pushd $tmpdir >/dev/null 2>&1
 
 # Prepare wrapper script and make it executable
@@ -188,10 +219,38 @@ cat << EOF_wrapper >  $CIC_WRAPPER
 # 2. remote directory will be cleaned up by someone else after the job 
 # To modify this script and add some preparation/cleanup you must change
 # ciconnect-sub
+EOF_wrapper
+
+if [ "x$WEBOPTION" == "xall" ]; then
+  cat << EOF_wrapper >>  $CIC_WRAPPER
+web_jobdir="$CIC_WEBDIR_BASE/`date -u '+cicsub%Y%m%d-%H'`"
+if [ ! -d $web_jobdir ]; then
+  mkdir -p $web_jobdir
+  if [ $? -ne 0 ]; then
+    echo "Unable to create the job directory $web_jobdir"
+    echo "Aborting job submission."
+    exit 1
+  fi
+  mktemp -d $web_jobdir/job.XXXXXXXX
+  mv ./* $CIC_WEBDIR_BASE/
+fi
+pushd $CIC_WEBDIR_BASE
+EOF_wrapper
+fi
+
+cat << EOF_wrapper >>  $CIC_WRAPPER
 
 ./htsub $OVERRIDE_OPTIONS --universe=vanilla $@
 
 EOF_wrapper
+
+if [ "x$WEBOPTION" == "xall" ]; then
+  cat << EOF_wrapper >>  $CIC_WRAPPER
+popd
+EOF_wrapper
+fi
+
+
 chmod +x $CIC_WRAPPER
 
 
